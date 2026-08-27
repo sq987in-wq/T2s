@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.piperapp.core.data.downloads.ModelDownloader
 import com.piperapp.core.engine.ort.OnnxTtsEngine
 import com.piperapp.core.engine.phonemize.NativePhonemizer
 import com.piperapp.core.engine.pipeline.SynthesisPipeline
@@ -17,7 +18,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,22 +88,40 @@ fun PiperTTSApp() {
                 onSynthesize = {
                     if (isProcessing) return@SynthesizePanel
                     isProcessing = true
-                    statusText = "Synthesizing..."
+                    statusText = "Checking model..."
 
                     scope.launch(Dispatchers.IO) {
                         try {
-                            val modelFile = File(context.filesDir, "models/$selectedVoice/model.onnx")
-                            if (!modelFile.exists()) {
-                                modelFile.parentFile?.mkdirs()
-                                context.assets.open("models/$selectedVoice/model.onnx").use { input ->
-                                    FileOutputStream(modelFile).use { output ->
-                                        input.copyTo(output)
-                                    }
+                            val modelDir = File(context.filesDir, "models/$selectedVoice")
+                            val modelFile = File(modelDir, "model.onnx")
+
+                            if (!modelFile.exists() || modelFile.length() == 0L) {
+                                withContext(Dispatchers.Main) {
+                                    statusText = "Downloading voice model (~60MB)..."
                                 }
+                                val downloader = ModelDownloader("", context.filesDir)
+                                val modelUrl = "https://huggingface.co/rhasspy/piper-voices/resolve/main/hi/hi_IN/priyamvada/medium/hi_IN-priyamvada-medium.onnx"
+                                
+                                val info = ModelDownloader.ModelInfo(
+                                    voiceId = selectedVoice,
+                                    url = modelUrl,
+                                    sha256 = "",
+                                    sizeBytes = 0L,
+                                    version = "1.0"
+                                )
+                                downloader.downloadModel(info)
+                            }
+
+                            withContext(Dispatchers.Main) {
+                                statusText = "Phonemizing text..."
                             }
 
                             val phonemizer = NativePhonemizer(selectedVoice)
                             val phoneIdsList = phonemizer.phonemize(text)
+
+                            withContext(Dispatchers.Main) {
+                                statusText = "Synthesizing audio..."
+                            }
 
                             val engine = OnnxTtsEngine(modelFile)
                             val pipeline = SynthesisPipeline(22050)
