@@ -38,6 +38,15 @@ class OfflineTTSService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            // §2.3 — close session + drop waveform buffers on low memory
+            try { sink.close() } catch (_: Exception) { }
+            scope.cancel()
+        }
+    }
+
     override fun onDestroy() { scope.cancel(); sink.close(); super.onDestroy() }
 
     companion object { private const val TAG = "OfflineTTSService" }

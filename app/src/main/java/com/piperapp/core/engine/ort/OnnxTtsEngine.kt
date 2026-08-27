@@ -5,6 +5,8 @@ import java.io.File
 
 // Blueprint §3.1 / §4.2 — session tuning
 class OnnxTtsEngine(private val modelFile: File) : AutoCloseable {
+    // §3.2 — must be called from Dispatchers.IO.limitedParallelism(1); never concurrent
+    private val dispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(1)
     private val env = OrtEnvironment.getEnvironment()
     private val session: OrtSession = env.createSession(modelFile.absolutePath,
         OrtSession.SessionOptions().apply {

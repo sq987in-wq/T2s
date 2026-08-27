@@ -14,6 +14,9 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0-OptionC"
+        ndk {
+            abiFilters("arm64-v8a", "x86_64")
+        }
     }
 
     buildTypes {
