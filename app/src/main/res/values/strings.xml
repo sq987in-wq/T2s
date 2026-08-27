@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Piper TTS — Option C</string>
+    <string name="synthesize">Synthesize (Offline)</string>
+    <string name="utterance_hint">Enter text to phonemize via JNI bridge</string>
+</resources>
