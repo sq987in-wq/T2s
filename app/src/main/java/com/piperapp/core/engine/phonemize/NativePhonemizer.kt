@@ -10,6 +10,9 @@ interface Phonemizer : AutoCloseable {
 }
 
 class NativePhonemizer(private val voiceDir: File) : Phonemizer {
+    // Secondary constructor so String path / voiceId works everywhere
+    constructor(voicePath: String) : this(File(voicePath))
+
     private val idMap = mutableMapOf<String, Long>()
     private var bosId: Long = 1L
     private var eosId: Long = 2L
@@ -17,7 +20,12 @@ class NativePhonemizer(private val voiceDir: File) : Phonemizer {
 
     init {
         try {
-            val jsonFile = File(voiceDir, "model.onnx.json")
+            val jsonFile = if (voiceDir.isDirectory) {
+                File(voiceDir, "model.onnx.json")
+            } else {
+                File(voiceDir.parentFile ?: voiceDir, "model.onnx.json")
+            }
+
             if (jsonFile.exists()) {
                 val json = JSONObject(jsonFile.readText())
                 if (json.has("phoneme_id_map")) {
