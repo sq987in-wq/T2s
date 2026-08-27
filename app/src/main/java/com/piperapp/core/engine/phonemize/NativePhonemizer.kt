@@ -52,20 +52,22 @@ class NativePhonemizer(private val voiceDir: File) : Phonemizer {
             "त" to listOf("t"), "थ" to listOf("t", "ʰ"), "द" to listOf("d"), "ध" to listOf("d", "ʰ"), "न" to listOf("n"),
             "प" to listOf("p"), "फ" to listOf("p", "ʰ"), "ब" to listOf("b"), "भ" to listOf("b", "ʰ"), "म" to listOf("m"),
             "य" to listOf("j"), "र" to listOf("r"), "ल" to listOf("l"), "व" to listOf("ʋ"),
-            "श" to listOf("ʃ"), "ष" to listOf("ʂ"), "स" to listOf("s"), "ह" to listOf("ɦ"),
+            "श" to listOf("ʃ"), "ष" to listOf("ʂ"), "स" to listOf("s"), "ह" to listOf("h"),
             "ड़" to listOf("ɽ"), "ढ़" to listOf("ɽ", "ʰ"), "फ़" to listOf("f"), "ज़" to listOf("z"), "ख़" to listOf("x"), "ग़" to listOf("ɣ")
         )
 
         val vowels = mapOf(
             "अ" to listOf("ə"), "आ" to listOf("a", "ː"), "इ" to listOf("ɪ"), "ई" to listOf("i", "ː"),
             "उ" to listOf("ʊ"), "ऊ" to listOf("u", "ː"), "ऋ" to listOf("r", "ɪ"),
-            "ए" to listOf("e", "ː"), "ऐ" to listOf("ɛ", "ː"), "ओ" to listOf("o", "ː"), "औ" to listOf("ɔ", "ː")
+            "ए" to listOf("e", "ː"), "ऐ" to listOf("ɛ", "ː"), "ओ" to listOf("o", "ː"), "औ" to listOf("ɔ", "ː"),
+            "ऑ" to listOf("ɔ", "ː")
         )
 
         val matras = mapOf(
             "ा" to listOf("a", "ː"), "ि" to listOf("ɪ"), "ी" to listOf("i", "ː"),
             "ु" to listOf("ʊ"), "ू" to listOf("u", "ː"), "ृ" to listOf("r", "ɪ"),
-            "े" to listOf("e", "ː"), "ै" to listOf("ɛ", "ː"), "ो" to listOf("o", "ː"), "ौ" to listOf("ɔ", "ː")
+            "े" to listOf("e", "ː"), "ै" to listOf("ɛ", "ː"), "ो" to listOf("o", "ː"), "ौ" to listOf("ɔ", "ː"),
+            "ॉ" to listOf("ɔ", "ː")
         )
 
         val virama = "्"
@@ -74,81 +76,72 @@ class NativePhonemizer(private val voiceDir: File) : Phonemizer {
         val visarga = "ः"
 
         val phonemes = mutableListOf<String>()
-        
-        // Normalize nukta characters
         val normalizedText = text
-            .replace("ड" + "़", "ड़")
-            .replace("ढ" + "़", "ढ़")
-            .replace("फ" + "़", "फ़")
-            .replace("ज" + "़", "ज़")
-            .replace("ख" + "़", "ख़")
-            .replace("ग" + "़", "ग़")
+            .replace("ऑफ़लाइन", "ऑफलाइन")
+            .replace("ऑ", "ओ")
+            .replace("ॉ", "ो")
+            .replace("ड़", "ड")
+            .replace("ढ़", "ढ")
+            .replace("फ़", "फ")
+            .replace("ज़", "ज")
 
         val len = normalizedText.length
         var i = 0
 
         while (i < len) {
-            var cStr = normalizedText[i].toString()
-            var jump = 1
-
-            if (i + 1 < len) {
-                val twoChar = cStr + normalizedText[i + 1].toString()
-                if (consonants.containsKey(twoChar)) {
-                    cStr = twoChar
-                    jump = 2
-                }
-            }
+            val cStr = normalizedText[i].toString()
 
             if (cStr == " ") {
                 phonemes.add(" ")
-                i += jump
+                i++
                 continue
             }
 
             if (consonants.containsKey(cStr)) {
                 val ph = consonants[cStr]!!
-                val nextChar = if (i + jump < len) normalizedText[i + jump].toString() else null
+                val nextChar = if (i + 1 < len) normalizedText[i + 1].toString() else null
 
                 phonemes.addAll(ph)
 
                 if (nextChar == virama) {
-                    i += jump + 1
+                    i += 2
                     continue
                 } else if (nextChar != null && matras.containsKey(nextChar)) {
                     phonemes.addAll(matras[nextChar]!!)
-                    i += jump + 1
+                    i += 2
                 } else {
-                    val isEnd = (i + jump == len) || (normalizedText[i + jump] == ' ')
+                    val isEnd = (i + 1 == len) || (normalizedText[i + 1] == ' ')
                     if (!isEnd) {
                         phonemes.add("ə")
                     }
-                    i += jump
+                    i++
                 }
                 continue
             }
 
             if (vowels.containsKey(cStr)) {
                 phonemes.addAll(vowels[cStr]!!)
-                i += jump
+                i++
                 continue
             }
 
             if (cStr == anusvara || cStr == candrabindu) {
                 phonemes.add("̃")
-                i += jump
+                i++
                 continue
             }
 
             if (cStr == visarga) {
-                phonemes.add("ɦ")
-                i += jump
+                phonemes.add("h")
+                i++
                 continue
             }
 
-            if (idMap.containsKey(cStr)) {
-                phonemes.add(cStr)
+            // English / ASCII words fallback
+            if (idMap.containsKey(cStr.lowercase())) {
+                phonemes.add(cStr.lowercase())
             }
-            i += jump
+            i++
         }
 
         return phonemes
@@ -159,16 +152,17 @@ class NativePhonemizer(private val voiceDir: File) : Phonemizer {
         val ids = mutableListOf<Long>()
         
         ids.add(bosId)
-        ids.add(padId)
 
+        // Piper VITS expects intersperse padding [pad, id, pad, id... pad]
         for (ph in ipaList) {
             val id = idMap[ph] ?: idMap[ph.lowercase()] ?: idMap[" "] ?: 0L
             if (id != 0L) {
-                ids.add(id)
                 ids.add(padId)
+                ids.add(id)
             }
         }
 
+        ids.add(padId)
         ids.add(eosId)
         return listOf(ids.toLongArray())
     }
