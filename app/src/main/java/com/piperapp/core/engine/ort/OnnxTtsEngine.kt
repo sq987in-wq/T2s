@@ -23,11 +23,9 @@ class OnnxTtsEngine(private val modelFile: File) : AutoCloseable {
 
         val inputTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(ids), longArrayOf(1, ids.size.toLong()))
         val lengthTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(longArrayOf(ids.size.toLong())), longArrayOf(1))
-        val scalesTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(scales), longArrayOf(1, 3))
+        val scalesTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(scales), longArrayOf(3))
 
         val inputs = mutableMapOf<String, OnnxTensor>()
-
-        // Check exact input names used by Piper VITS
         for (name in inputNames) {
             when {
                 name == "input" -> inputs[name] = inputTensor
