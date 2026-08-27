@@ -26,14 +26,17 @@ class OnnxTtsEngine(private val modelFile: File) : AutoCloseable {
         val scalesTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(scales), longArrayOf(1, 3))
 
         val inputs = mutableMapOf<String, OnnxTensor>()
-        if (inputNames.contains("input")) inputs["input"] = inputTensor
-        if (inputNames.contains("input_lengths")) inputs["input_lengths"] = lengthTensor
-        if (inputNames.contains("scales")) inputs["scales"] = scalesTensor
 
-        // कुछ Piper मॉडल्स में speaker id (sid) जरूरी होता है
-        if (inputNames.contains("sid")) {
-            val sidTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(longArrayOf(0L)), longArrayOf(1))
-            inputs["sid"] = sidTensor
+        // Check exact input names used by Piper VITS
+        for (name in inputNames) {
+            when {
+                name == "input" -> inputs[name] = inputTensor
+                name == "input_lengths" || name == "lengths" -> inputs[name] = lengthTensor
+                name == "scales" -> inputs[name] = scalesTensor
+                name == "sid" -> {
+                    inputs[name] = OnnxTensor.createTensor(env, LongBuffer.wrap(longArrayOf(0L)), longArrayOf(1))
+                }
+            }
         }
 
         try {
