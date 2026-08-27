@@ -1,17 +1,8 @@
 cmake_minimum_required(VERSION 3.22.1)
-project("piper_phonemizer_bridge")
-
-# Locate the Native App Glue (optional, for logging)
+project("piper_phonemize_bridge")
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_library(log-lib log)
-
-# Source files for JNI bridge (Option C Hybrid)
-add_library(
-    piper_phonemizer
-    SHARED
-    src/main/jni/piper_phonemize_bridge.cpp
-)
-
-target_link_libraries(piper_phonemizer ${log-lib})
-
-# Include dirs for piper-phonemize headers (to be provided by CI/downloaded SDK)
+add_library(piper_phonemize SHARED src/main/jni/piper_phonemize_bridge.cpp)
+target_link_libraries(piper_phonemize ${log-lib})
 include_directories(${CMAKE_SOURCE_DIR}/src/main/assets/include)
