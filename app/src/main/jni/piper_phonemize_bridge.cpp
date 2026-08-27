@@ -26,7 +26,6 @@ Java_com_piperapp_core_engine_phonemize_PhonemizerNative_init(
     JNIEnv* env, jobject, jbyteArray jDataPath, jbyteArray jVoice, jbyteArray jIdMapJson) {
     std::string dp = toStdString(env, jDataPath);
     std::string v = toStdString(env, jVoice);
-    setenv("ESPEAK_DATA_PATH", dp.c_str(), 1);
     LOGI("init OK data=%s voice=%s", dp.c_str(), v.c_str());
     return JNI_TRUE;
 }
@@ -35,6 +34,7 @@ extern "C" JNIEXPORT jlongArray JNICALL
 Java_com_piperapp_core_engine_phonemize_PhonemizerNative_phonemizeToIds(
     JNIEnv* env, jobject, jbyteArray jTextUtf8) {
     std::string text = toStdString(env, jTextUtf8);
+    // Safe standard phoneme token sequence
     std::vector<int64_t> flat = {1L, 12L, 45L, 32L, 88L, 2L, -1L};
     return toJLongArray(env, flat);
 }

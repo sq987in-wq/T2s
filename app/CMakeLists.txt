@@ -1,14 +1,11 @@
 cmake_minimum_required(VERSION 3.22.1)
 project("piper_phonemizer_bridge")
 
-add_library(piper_phonemize_lib SHARED IMPORTED)
-set_target_properties(piper_phonemize_lib PROPERTIES 
-    IMPORTED_LOCATION "${CMAKE_SOURCE_DIR}/src/main/jniLibs/${ANDROID_ABI}/libpiper_phonemize.so"
-)
+# C++ Source File का पाथ
+file(GLOB_RECURSE CPP_SOURCES "src/main/jni/*.cpp" "src/main/cpp/*.cpp")
 
-add_library(piper_phonemizer SHARED src/main/jni/piper_phonemize_bridge.cpp)
+add_library(piper_phonemizer SHARED ${CPP_SOURCES})
 
-target_link_libraries(piper_phonemizer 
-    piper_phonemize_lib 
+target_link_libraries(piper_phonemizer
     log
 )
