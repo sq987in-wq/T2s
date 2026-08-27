@@ -6,83 +6,35 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.pipertts.app.data.room.PiperTTSDatabase
-import com.pipertts.app.domain.GenerateSpeechUseCase
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import com.pipertts.app.core.app.PiperTTSApp
+import com.pipertts.app.ui.theme.PiperTTSTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PiperTTSApp() {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val database = remember { PiperTTSDatabase.getDatabase(context) }
-    val useCase = remember { GenerateSpeechUseCase(database) }
-
-    var text by remember { mutableStateOf("Hello from offline Piper TTS (Option C)") }
-    var result by remember { mutableStateOf("") }
+    var text by remember { mutableStateOf("नमस्ते — Hello from offline Piper TTS (Option C Hybrid)") }
+    var selectedVoice by remember { mutableStateOf("hi_IN-priyamvada-medium") }
+    var speed by remember { mutableFloatStateOf(1.02f) }
+    var expressiveness by remember { mutableFloatStateOf(0.45f) }
+    var stability by remember { mutableFloatStateOf(0.8f) }
     var isProcessing by remember { mutableStateOf(false) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Piper TTS — Option C Hybrid") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary
-                )
+    Scaffold(topBar = { TopAppBar(title = { Text("Piper TTS — Option C") }) }) { padding ->
+        Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            VoiceSelector(voices = listOf("hi_IN-priyamvada-medium"), selected = selectedVoice, onSelect = { selectedVoice = it })
+            SynthesizePanel(
+                text = text, onTextChange = { text = it },
+                speed = speed, onSpeedChange = { speed = it },
+                expressiveness = expressiveness, onExpressivenessChange = { expressiveness = it },
+                stability = stability, onStabilityChange = { stability = it },
+                onSynthesize = { isProcessing = true; isProcessing = false }, // §3.2 service call placeholder
+                isProcessing = isProcessing
             )
-        }
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "Offline Hybrid Pipeline (Kotlin + ONNX + JNI)",
-                style = MaterialTheme.typography.titleMedium
-            )
-
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                label = { Text("Utterance text") },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 3
-            )
-
-            Button(
-                onClick = {
-                    isProcessing = true
-                    // Note: real implementation would use LaunchedEffect / ViewModel
-                    // For skeleton, simulate result
-                    result = "Phonemized via JNI bridge → ONNX inference ready"
-                    isProcessing = false
-                },
-                enabled = !isProcessing,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                if (isProcessing) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                else Text("Synthesize (Offline)")
-            }
-
-            if (result.isNotEmpty()) {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Result", style = MaterialTheme.typography.labelLarge)
-                        Text(result, style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            Text(
-                text = "Model: piper-phonemize → onnxruntime-android",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline
-            )
+            WaveformView(envelopes = listOf(0.3f, 0.8f, 0.4f, 0.9f, 0.2f))
+            Text("First-run: ModelDownloader checks assets/models.json → filesDir/models/ (§2.2)", style = MaterialTheme.typography.labelSmall)
         }
     }
 }
