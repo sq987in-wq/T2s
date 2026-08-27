@@ -14,6 +14,7 @@ import com.piperapp.core.engine.ort.OnnxTtsEngine
 import com.piperapp.core.engine.phonemize.NativePhonemizer
 import com.piperapp.core.engine.pipeline.SynthesisPipeline
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -28,18 +29,34 @@ fun PiperTTSApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var text by remember { mutableStateOf("नमस्ते, यह ऑफ़लाइन टीटीएस की आवाज़ है") }
+    var text by remember { mutableStateOf("नमस्ते, यह ऑफ़लाइन टीटीएस अब पूरी तरह काम कर रहा है।") }
     var selectedVoice by remember { mutableStateOf("hi_IN-priyamvada-medium") }
     var speed by remember { mutableFloatStateOf(1.0f) }
     var expressiveness by remember { mutableFloatStateOf(0.667f) }
     var stability by remember { mutableFloatStateOf(0.8f) }
     
     var isProcessing by remember { mutableStateOf(false) }
+    var isPlaying by remember { mutableStateOf(false) }
     var downloadProgress by remember { mutableFloatStateOf(0f) }
     var statusText by remember { mutableStateOf("Ready") }
 
+    var currentTrack by remember { mutableStateOf<AudioTrack?>(null) }
+    var synthJob by remember { mutableStateOf<Job?>(null) }
+
+    fun stopPlayback() {
+        try {
+            currentTrack?.stop()
+            currentTrack?.release()
+            currentTrack = null
+        } catch (_: Exception) {}
+        isPlaying = false
+        statusText = "Stopped"
+    }
+
     fun playPcm(pcmData: ShortArray, sampleRate: Int = 22050) {
         if (pcmData.isEmpty()) return
+        stopPlayback()
+
         val minBuf = AudioTrack.getMinBufferSize(
             sampleRate,
             AudioFormat.CHANNEL_OUT_MONO,
@@ -64,6 +81,17 @@ fun PiperTTSApp() {
             .build()
 
         track.write(pcmData, 0, pcmData.size)
+        track.setPlaybackPositionUpdateListener(object : AudioTrack.OnPlaybackPositionUpdateListener {
+            override fun onPeriodicNotification(track: AudioTrack?) {}
+            override fun onMarkerReached(track: AudioTrack?) {
+                isPlaying = false
+                statusText = "Playback finished"
+            }
+        })
+        track.notificationMarkerPosition = pcmData.size
+
+        currentTrack = track
+        isPlaying = true
         track.play()
     }
 
@@ -96,27 +124,26 @@ fun PiperTTSApp() {
                     isProcessing = true
                     downloadProgress = 0f
 
-                    scope.launch(Dispatchers.IO) {
+                    synthJob = scope.launch(Dispatchers.IO) {
                         try {
                             val modelDir = File(context.filesDir, "models/$selectedVoice")
                             modelDir.mkdirs()
                             val modelFile = File(modelDir, "model.onnx")
+                            val jsonFile = File(modelDir, "model.onnx.json")
 
-                            // 1. Download with explicit progress tracking
+                            val client = OkHttpClient.Builder()
+                                .connectTimeout(60, TimeUnit.SECONDS)
+                                .readTimeout(120, TimeUnit.SECONDS)
+                                .build()
+
+                            // 1. Model Download (.onnx)
                             if (!modelFile.exists() || modelFile.length() < 10_000_000L) {
                                 withContext(Dispatchers.Main) {
-                                    statusText = "Connecting to download server..."
+                                    statusText = "Downloading Voice Model (~60MB)..."
                                 }
-                                val client = OkHttpClient.Builder()
-                                    .connectTimeout(60, TimeUnit.SECONDS)
-                                    .readTimeout(120, TimeUnit.SECONDS)
-                                    .build()
-
                                 val url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/hi/hi_IN/priyamvada/medium/hi_IN-priyamvada-medium.onnx"
                                 val request = Request.Builder().url(url).build()
                                 val response = client.newCall(request).execute()
-
-                                if (!response.isSuccessful) throw Exception("HTTP error: ${response.code}")
                                 val body = response.body ?: throw Exception("Empty response body")
                                 val totalBytes = body.contentLength()
                                 val tempFile = File(modelDir, "model.onnx.tmp")
@@ -135,33 +162,44 @@ fun PiperTTSApp() {
                                                 val totalMb = totalBytes / (1024 * 1024)
                                                 withContext(Dispatchers.Main) {
                                                     downloadProgress = prog
-                                                    statusText = "Downloading model: ${mb}MB / ${totalMb}MB (${(prog * 100).toInt()}%)"
+                                                    statusText = "Downloading: ${mb}MB / ${totalMb}MB (${(prog * 100).toInt()}%)"
                                                 }
                                             }
                                         }
                                     }
                                 }
-
                                 if (modelFile.exists()) modelFile.delete()
                                 tempFile.renameTo(modelFile)
                             }
 
-                            // 2. Phonemization
-                            withContext(Dispatchers.Main) {
-                                statusText = "Phonemizing text..."
+                            // 2. Config Download (.json)
+                            if (!jsonFile.exists() || jsonFile.length() < 100L) {
+                                withContext(Dispatchers.Main) {
+                                    statusText = "Downloading Voice Config..."
+                                }
+                                val jsonUrl = "https://huggingface.co/rhasspy/piper-voices/resolve/main/hi/hi_IN/priyamvada/medium/hi_IN-priyamvada-medium.onnx.json"
+                                val jsonReq = Request.Builder().url(jsonUrl).build()
+                                val jsonResp = client.newCall(jsonReq).execute()
+                                val jsonBody = jsonResp.body ?: throw Exception("Empty json body")
+                                jsonFile.writeBytes(jsonBody.bytes())
                             }
-                            val phonemizer = NativePhonemizer(selectedVoice)
+
+                            // 3. Phonemization
+                            withContext(Dispatchers.Main) {
+                                statusText = "Processing phonemes..."
+                            }
+                            val phonemizer = NativePhonemizer(modelDir)
                             val phoneIdsList = phonemizer.phonemize(text)
 
-                            // 3. ONNX Synthesis
+                            // 4. ONNX Synthesis
                             withContext(Dispatchers.Main) {
-                                statusText = "Synthesizing audio on-device..."
+                                statusText = "Synthesizing full voice..."
                             }
                             val engine = OnnxTtsEngine(modelFile)
                             val pipeline = SynthesisPipeline(22050)
 
                             val allAudio = mutableListOf<Short>()
-                            val scales = floatArrayOf(speed, expressiveness, stability)
+                            val scales = floatArrayOf(expressiveness, speed, stability)
 
                             for (ids in phoneIdsList) {
                                 val floatPcm = engine.synthesize(ids, scales)
@@ -177,7 +215,7 @@ fun PiperTTSApp() {
                             val finalPcm = allAudio.toShortArray()
                             withContext(Dispatchers.Main) {
                                 isProcessing = false
-                                statusText = "Playing audio (${finalPcm.size} samples)"
+                                statusText = "Speaking (${finalPcm.size} samples)..."
                                 playPcm(finalPcm)
                             }
                         } catch (e: Throwable) {
@@ -190,6 +228,17 @@ fun PiperTTSApp() {
                     }
                 }
             )
+
+            // Playback Stop Button
+            if (isPlaying) {
+                Button(
+                    onClick = { stopPlayback() },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Stop Audio")
+                }
+            }
 
             if (isProcessing && downloadProgress > 0f) {
                 LinearProgressIndicator(

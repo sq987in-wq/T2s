@@ -1,39 +1,46 @@
 package com.piperapp.core.engine.phonemize
 
-import java.nio.charset.Charset
+import org.json.JSONObject
+import java.io.File
 
-class PhonemizerException(msg: String = "Phonemization failed") : Exception(msg)
+class NativePhonemizer(private val voiceDir: File) : Phonemizer {
+    private val idMap = mutableMapOf<String, Long>()
+    private val bosId: Long
+    private val eosId: Long
+    private val padId: Long
 
-interface Phonemizer : AutoCloseable {
-    suspend fun phonemize(text: String): List<LongArray>
-}
-
-private fun LongArray.split(delimiter: Long): List<LongArray> {
-    val result = mutableListOf<LongArray>()
-    val current = mutableListOf<Long>()
-    for (item in this) {
-        if (item == delimiter) {
-            if (current.isNotEmpty()) {
-                result.add(current.toLongArray())
-                current.clear()
+    init {
+        val jsonFile = File(voiceDir, "model.onnx.json")
+        if (jsonFile.exists()) {
+            val json = JSONObject(jsonFile.readText())
+            val phonemeIdMap = json.getJSONObject("phoneme_id_map")
+            for (key in phonemeIdMap.keys()) {
+                val arr = phonemeIdMap.getJSONArray(key)
+                if (arr.length() > 0) {
+                    idMap[key] = arr.getLong(0)
+                }
             }
-        } else {
-            current.add(item)
         }
+        bosId = idMap["^"] ?: 1L
+        eosId = idMap["$"] ?: 2L
+        padId = idMap["_"] ?: 0L
     }
-    if (current.isNotEmpty()) {
-        result.add(current.toLongArray())
-    }
-    return result
-}
 
-class NativePhonemizer(private val voice: String) : Phonemizer {
     override suspend fun phonemize(text: String): List<LongArray> {
-        val bytes = text.toByteArray(Charset.forName("UTF-8"))
-        val arr = PhonemizerNative.phonemizeToIds(bytes)
-            ?: longArrayOf(1L, 12L, 45L, 32L, 88L, 2L)
-        val res = arr.split(-1L).filter { it.isNotEmpty() }
-        return if (res.isEmpty()) listOf(longArrayOf(1L, 12L, 45L, 32L, 88L, 2L)) else res
+        val ids = mutableListOf<Long>()
+        ids.add(bosId)
+        ids.add(padId)
+
+        for (ch in text) {
+            val s = ch.toString()
+            val id = idMap[s] ?: idMap[s.lowercase()] ?: idMap[" "] ?: 0L
+            ids.add(id)
+            ids.add(padId)
+        }
+
+        ids.add(eosId)
+        return listOf(ids.toLongArray())
     }
+
     override fun close() {}
 }
