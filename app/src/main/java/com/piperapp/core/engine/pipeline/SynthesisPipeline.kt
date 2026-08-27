@@ -3,20 +3,46 @@ package com.piperapp.core.engine.pipeline
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-// §4.3 — clause-chunked streaming synthesis; 150-sample crossfade; 350 ms breath pause
-class SynthesisPipeline {
-    sealed class State { object Idle : State(); data class Synthesizing(val clause: Int, val total: Int) : State(); object Streaming : State() }
-    private val _state = MutableStateFlow<State>(State.Idle)
+// §4.3 — clause-chunked streaming synthesis; 150-sample equal-power crossfade;
+// 350 ms breath pause at sentence breaks; 700 ms at paragraph breaks;
+// normalize to -1 dBFS peak; never O(script)
+class SynthesisPipeline(private val sampleRate: Int = 22050) {
+    sealed class State {
+        object Idle : State()
+        data class Synthesizing(val clause: Int, val total: Int) : State()
+        object Streaming : State()
+    }
+    private val _state: MutableStateFlow<State> = MutableStateFlow(State.Idle)
     val state: StateFlow<State> = _state
 
-    // Crossfade: 150 samples ~6.8 ms @ 22.05 kHz (Blueprint verified default)
-    // Breath pause: 350 ms = 7,718 samples @ 22.05 kHz; paragraph = 700 ms
-    fun processClause(pcm: ShortArray, isLastInSentence: Boolean, isParagraphBreak: Boolean): ShortArray {
-        val crossfadeSamples = 150
-        val breathSamples = (0.350 * 22050).toInt() // 7,718
-        val paraSamples = (0.700 * 22050).toInt()
-        // Stub: real implementation applies equal-power crossfade at joints,
-        // inserts silence arrays for pauses, and normalizes to -1 dBFS peak
-        return pcm // refined pipeline logic to be wired to AudioSink
+    companion object {
+        const val CROSSFADE_SAMPLES = 150   // ~6.8 ms @ 22.05 kHz (Blueprint default)
+        const val BREATH_MS = 350
+        const val PARA_MS = 700
+    }
+
+    // Equal-power crossfade: fade out clause A, fade in clause B over 150 samples
+    fun crossfade(a: ShortArray, b: ShortArray): ShortArray {
+        val len = minOf(a.size, b.size, CROSSFADE_SAMPLES)
+        val out = ShortArray(a.size + b.size - len)
+        for (i in out.indices) {
+            val av = if (i < len) a[i].toFloat() * (1.0f - i / len.toFloat()) else a[i].toFloat()
+            val bv = if (i >= a.size - len) b[i - (a.size - len)].toFloat() * ((i - (a.size - len)) / len.toFloat()) else 0.0f
+            out[i] = (av + bv).toInt().toShort()
+        }
+        return out
+    }
+
+    fun silenceMs(ms: Long): ShortArray {
+        val samples = (ms * sampleRate / 1000).toInt()
+        return ShortArray(samples) { 0 }
+    }
+
+    fun normalizePeak(pcm: ShortArray, targetDb: Double = -1.0): ShortArray {
+        var maxAmp = 0.0
+        for (s in pcm) maxAmp = maxOf(maxAmp, kotlin.math.abs(s.toInt()))
+        if (maxAmp < 1) return pcm
+        val gain = (10.0.pow(targetDb / 20.0) * Short.MAX_VALUE.toDouble()) / maxAmp
+        return ShortArray(pcm.size) { i -> (pcm[i] * gain).toInt().toShort() }
     }
 }

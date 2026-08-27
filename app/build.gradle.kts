@@ -80,7 +80,7 @@ dependencies {
     ksp("androidx.room:room-compiler:$roomVersion")
 
     // ONNX Runtime (hybrid inference engine)
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.16.3")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.2")
 
     // Kotlin stdlib & coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
