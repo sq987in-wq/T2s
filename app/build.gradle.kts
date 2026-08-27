@@ -14,8 +14,9 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0-OptionC"
+
         ndk {
-            abiFilters("arm64-v8a", "x86_64")
+            abiFilters.addAll(listOf("arm64-v8a", "x86_64"))
         }
     }
 
@@ -35,8 +36,8 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
+    kotlin {
+        jvmToolchain(17)
     }
 
     buildFeatures {
@@ -69,7 +70,6 @@ android {
 }
 
 dependencies {
-    // AndroidX Core & Compose (Option C UI layer)
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.activity:activity-compose:1.8.2")
@@ -80,19 +80,14 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
 
-    // Room (offline DB for voice configs & utterances)
     val roomVersion = "2.6.1"
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
 
-    // ONNX Runtime (hybrid inference engine)
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.2")
-
-    // Kotlin stdlib & coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
-    // Testing
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
