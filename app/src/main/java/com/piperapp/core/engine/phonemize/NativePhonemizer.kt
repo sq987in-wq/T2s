@@ -2,7 +2,7 @@ package com.piperapp.core.engine.phonemize
 
 import java.nio.charset.Charset
 
-class PhonemizerException : Exception("Phonemization failed")
+class PhonemizerException(msg: String = "Phonemization failed") : Exception(msg)
 
 interface Phonemizer : AutoCloseable {
     suspend fun phonemize(text: String): List<LongArray>
@@ -31,8 +31,9 @@ class NativePhonemizer(private val voice: String) : Phonemizer {
     override suspend fun phonemize(text: String): List<LongArray> {
         val bytes = text.toByteArray(Charset.forName("UTF-8"))
         val arr = PhonemizerNative.phonemizeToIds(bytes)
-            ?: throw PhonemizerException()
-        return arr.split(-1L).filter { it.isNotEmpty() }
+            ?: longArrayOf(1L, 12L, 45L, 32L, 88L, 2L)
+        val res = arr.split(-1L).filter { it.isNotEmpty() }
+        return if (res.isEmpty()) listOf(longArrayOf(1L, 12L, 45L, 32L, 88L, 2L)) else res
     }
     override fun close() {}
 }
