@@ -50,7 +50,7 @@ android {
 
     packaging {
         resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes.add("/META-INF/{AL2.0,LGPL2.1}")
         }
     }
 
@@ -61,7 +61,11 @@ android {
         }
     }
 
-    sourceSets["main"].jniLibs.srcDir("src/main/jniLibs")
+    sourceSets {
+        getByName("main") {
+            jniLibs.srcDir("src/main/jniLibs")
+        }
+    }
 }
 
 dependencies {
