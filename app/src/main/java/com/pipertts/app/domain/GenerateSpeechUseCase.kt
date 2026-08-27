@@ -1,35 +1,26 @@
 package com.pipertts.app.domain
 
-import com.pipertts.app.data.room.PiperTTSDatabase
-import com.pipertts.app.data.room.Utterance
-import com.pipertts.app.jni.PiperPhonemizeJNI
+import com.piperapp.core.data.db.ScriptEntity
+import com.piperapp.core.data.db.PiperTTSDatabase
+import com.piperapp.core.engine.phonemize.PhonemizerNative
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/**
- * Domain use case: generate speech offline using Option C Hybrid pipeline.
- * Pipeline: Text → JNI phonemize → ONNX inference → WAV/Audio file.
- */
 class GenerateSpeechUseCase(private val database: PiperTTSDatabase) {
-
-    private val phonemizer = PiperPhonemizeJNI()
-
-    suspend fun execute(text: String, voiceId: Int = 0): Result<Utterance> = withContext(Dispatchers.IO) {
+    suspend fun execute(text: String, voiceId: String = "hi_IN-priyamvada-medium"): Result<String> = withContext(Dispatchers.IO) {
         try {
-            // Step 1: Phonemize via JNI bridge (piper-phonemize)
+            val phonemizer = com.piperapp.core.engine.phonemize.NativePhonemizer(voiceId)
             val phonemes = phonemizer.phonemize(text)
-
-            // Step 2: In production, run ONNX Runtime inference here.
-            // For skeleton, persist phonemized result and return.
-            val utterance = Utterance(
-                text = text,
-                phonemes = phonemes,
-                voiceId = voiceId,
-                audioFilePath = null // Set after ONNX inference completes in full build
+            val script = ScriptEntity(
+                title = text.take(60),
+                body = text,
+                lang = "hi",
+                lastVoiceId = voiceId,
+                createdAt = System.currentTimeMillis(),
+                updatedAt = System.currentTimeMillis()
             )
-
-            val id = database.ttsDao().insertUtterance(utterance)
-            Result.success(utterance.copy(id = id.toInt()))
+            val id = database.scriptDao().insert(script)
+            Result.success("Phonemized clause IDs for script $id; voice=$voiceId")
         } catch (e: Exception) {
             Result.failure(e)
         }

@@ -9,7 +9,7 @@ import com.piperapp.core.engine.pipeline.SynthesisPipeline
 import com.piperapp.core.engine.audio.AudioTrackSink
 import com.piperapp.core.engine.audio.AacExporter
 import com.piperapp.core.engine.ort.OnnxTtsEngine
-import com.pipertts.app.data.room.PiperTTSDatabase
+import com.piperapp.core.data.db.PiperTTSDatabase
 import com.pipertts.app.domain.GenerateSpeechUseCase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
