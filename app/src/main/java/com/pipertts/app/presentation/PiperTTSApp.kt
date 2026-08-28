@@ -53,7 +53,12 @@ fun PiperTTSApp() {
         statusText = "Stopped"
     }
 
-    fun playPcm(pcmData: ShortArray, sampleRate: Int = 22050) {
+    /**
+     * Streams the full PCM via a MODE_STREAM AudioTrack (no MODE_STATIC size
+     * limit, so long scripts play without buffer errors). Writes are blocking
+     * and backpressured by the track; playback completes asynchronously.
+     */
+    fun streamPlayback(pcmData: ShortArray, sampleRate: Int = 22050) {
         if (pcmData.isEmpty()) return
         stopPlayback()
 
@@ -76,23 +81,35 @@ fun PiperTTSApp() {
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                     .build()
             )
-            .setBufferSizeInBytes(maxOf(minBuf, pcmData.size * 2))
-            .setTransferMode(AudioTrack.MODE_STATIC)
+            .setBufferSizeInBytes(maxOf(minBuf, minBuf * 4))
+            .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
 
-        track.write(pcmData, 0, pcmData.size)
         track.setPlaybackPositionUpdateListener(object : AudioTrack.OnPlaybackPositionUpdateListener {
             override fun onPeriodicNotification(track: AudioTrack?) {}
             override fun onMarkerReached(track: AudioTrack?) {
                 isPlaying = false
                 statusText = "Playback finished"
+                try { track?.stop(); track?.release() } catch (_: Exception) {}
+                if (currentTrack === track) currentTrack = null
             }
         })
+        // mono PCM16 => 1 frame == 1 sample
         track.notificationMarkerPosition = pcmData.size
 
         currentTrack = track
         isPlaying = true
         track.play()
+
+        // Write in chunks (blocking); must be called off the main thread.
+        val buf = ShortArray(2048)
+        var idx = 0
+        while (idx < pcmData.size) {
+            val len = minOf(buf.size, pcmData.size - idx)
+            System.arraycopy(pcmData, idx, buf, 0, len)
+            track.write(buf, 0, len)
+            idx += len
+        }
     }
 
     Scaffold(topBar = { TopAppBar(title = { Text("Piper TTS — Option C") }) }) { padding ->
@@ -184,40 +201,43 @@ fun PiperTTSApp() {
                                 jsonFile.writeBytes(jsonBody.bytes())
                             }
 
-                            // 3. Phonemization
+                            // 3. Phonemization (clause-segmented)
                             withContext(Dispatchers.Main) {
                                 statusText = "Processing phonemes..."
                             }
                             val phonemizer = NativePhonemizer(modelDir)
-                            val phoneIdsList = phonemizer.phonemize(text)
+                            val clauseResults = phonemizer.phonemizeClauses(text)
+                            if (clauseResults.isEmpty()) {
+                                throw IllegalStateException("No pronounceable text found")
+                            }
 
-                            // 4. ONNX Synthesis
+                            // 4. ONNX Synthesis per clause
                             withContext(Dispatchers.Main) {
-                                statusText = "Synthesizing full voice..."
+                                statusText = "Synthesizing ${clauseResults.size} clause(s)..."
                             }
                             val engine = OnnxTtsEngine(modelFile)
                             val pipeline = SynthesisPipeline(22050)
-
-                            val allAudio = mutableListOf<Short>()
                             val scales = floatArrayOf(expressiveness, speed, stability)
 
-                            for (ids in phoneIdsList) {
-                                val floatPcm = engine.synthesize(ids, scales)
+                            val clausePcm = ArrayList<ShortArray>()
+                            val isSentenceEnd = ArrayList<Boolean>()
+                            for (cr in clauseResults) {
+                                val floatPcm = engine.synthesize(cr.ids, scales)
                                 val shortPcm = ShortArray(floatPcm.size) { i ->
                                     (floatPcm[i] * 32767f).coerceIn(-32768f, 32767f).toInt().toShort()
                                 }
-                                val normPcm = pipeline.normalizePeak(shortPcm)
-                                for (sample in normPcm) allAudio.add(sample)
+                                clausePcm.add(pipeline.normalizeLoudness(shortPcm))
+                                isSentenceEnd.add(cr.isSentenceEnd)
                             }
-
                             engine.close()
 
-                            val finalPcm = allAudio.toShortArray()
+                            // 5. Assemble with crossfade + breath pauses, then stream
+                            val finalPcm = pipeline.assemble(clausePcm, isSentenceEnd)
                             withContext(Dispatchers.Main) {
                                 isProcessing = false
                                 statusText = "Speaking (${finalPcm.size} samples)..."
-                                playPcm(finalPcm)
                             }
+                            streamPlayback(finalPcm)
                         } catch (e: Throwable) {
                             withContext(Dispatchers.Main) {
                                 isProcessing = false

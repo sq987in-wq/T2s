@@ -9,163 +9,69 @@ interface Phonemizer : AutoCloseable {
     suspend fun phonemize(text: String): List<LongArray>
 }
 
+/**
+ * Phonemization front-end.
+ *
+ * This builds a `List<LongArray>` of clause ID tensors: the input text is
+ * normalized (NFC), segmented into prosody clauses (। . ! ? ; ॥), each clause
+ * is converted to phoneme tokens by [DevanagariG2P] (all tokens guaranteed to
+ * be in the model vocabulary), and each clause is framed with piper-exact
+ * BOS/PAD/EOS padding by [PhonemeIdMap].
+ *
+ * Long clauses are capped at [ClauseSegmenter.MAX_PHONEMES] to protect model
+ * quality (a leading cause of the old "robotic pacing").
+ *
+ * NOTE on the name: despite "Native", this is the pure-Kotlin engine. The
+ * prebuilt `libpiper_phonemize.so` in this repo is a desktop-Linux/glibc
+ * binary (needs libc.so.6, libespeak-ng.so.1) and cannot load on Android —
+ * it was the real source of the historical NDK crashes. True byte-parity with
+ * espeak-ng requires an Android-native piper-phonemize build; see
+ * docs/DeepAudit-100x.md for the optional path. This Kotlin G2P is the
+ * always-available, build-safe engine and fixes the mapping/pacing defects.
+ */
 class NativePhonemizer(private val voiceDir: File) : Phonemizer {
     constructor(voicePath: String) : this(File(voicePath))
 
-    private val idMap = mutableMapOf<String, Long>()
-    private var bosId: Long = 1L
-    private var eosId: Long = 2L
-    private var padId: Long = 0L
+    private val idMap: PhonemeIdMap
+    private val g2p = DevanagariG2P()
 
     init {
+        val jsonFile = if (voiceDir.isDirectory) {
+            File(voiceDir, "model.onnx.json")
+        } else {
+            File(voiceDir.parentFile ?: voiceDir, "model.onnx.json")
+        }
+        if (!jsonFile.exists()) {
+            throw PhonemizerException("Voice config not found: ${jsonFile.absolutePath}")
+        }
         try {
-            val jsonFile = if (voiceDir.isDirectory) {
-                File(voiceDir, "model.onnx.json")
-            } else {
-                File(voiceDir.parentFile ?: voiceDir, "model.onnx.json")
-            }
+            idMap = PhonemeIdMap.parse(JSONObject(jsonFile.readText()))
+        } catch (e: Exception) {
+            throw PhonemizerException("Failed to parse phoneme_id_map: ${e.message}")
+        }
+    }
 
-            if (jsonFile.exists()) {
-                val json = JSONObject(jsonFile.readText())
-                if (json.has("phoneme_id_map")) {
-                    val phonemeIdMap = json.getJSONObject("phoneme_id_map")
-                    for (key in phonemeIdMap.keys()) {
-                        val arr = phonemeIdMap.getJSONArray(key)
-                        if (arr.length() > 0) {
-                            idMap[key] = arr.getLong(0)
-                        }
-                    }
+    data class ClauseResult(val ids: LongArray, val isSentenceEnd: Boolean)
+
+    /** Segment + phonemize into clause ID tensors, with sentence-end metadata. */
+    suspend fun phonemizeClauses(text: String): List<ClauseResult> {
+        val clauses = ClauseSegmenter.segment(text)
+        if (clauses.isEmpty()) return emptyList()
+        val result = ArrayList<ClauseResult>()
+        for (clause in clauses) {
+            val phonemes = g2p.phonemize(clause.text)
+            for (segment in ClauseSegmenter.splitAtCap(phonemes)) {
+                val ids = idMap.phonemesToIds(segment)
+                if (ids.size > 2) { // > BOS+PAD+EOS means real content
+                    result.add(ClauseResult(ids, clause.isSentenceEnd))
                 }
             }
-        } catch (_: Exception) {}
-
-        bosId = idMap["^"] ?: 1L
-        eosId = idMap["$"] ?: 2L
-        padId = idMap["_"] ?: 0L
-    }
-
-    private fun devanagariToIpa(text: String): List<String> {
-        val consonants = mapOf(
-            "क" to listOf("k"), "ख" to listOf("k", "ʰ"), "ग" to listOf("ɡ"), "घ" to listOf("ɡ", "ʰ"), "ङ" to listOf("ŋ"),
-            "च" to listOf("t", "ʃ"), "छ" to listOf("t", "ʃ", "ʰ"), "ज" to listOf("d", "ʒ"), "झ" to listOf("d", "ʒ", "ʰ"), "ञ" to listOf("ɲ"),
-            "ट" to listOf("ʈ"), "ठ" to listOf("ʈ", "ʰ"), "ड" to listOf("ɖ"), "ढ" to listOf("ɖ", "ʰ"), "ण" to listOf("ɳ"),
-            "त" to listOf("t"), "थ" to listOf("t", "ʰ"), "द" to listOf("d"), "ध" to listOf("d", "ʰ"), "न" to listOf("n"),
-            "प" to listOf("p"), "फ" to listOf("p", "ʰ"), "ब" to listOf("b"), "भ" to listOf("b", "ʰ"), "म" to listOf("m"),
-            "य" to listOf("j"), "र" to listOf("r"), "ल" to listOf("l"), "व" to listOf("ʋ"),
-            "श" to listOf("ʃ"), "ष" to listOf("ʂ"), "स" to listOf("s"), "ह" to listOf("h"),
-            "ड़" to listOf("ɽ"), "ढ़" to listOf("ɽ", "ʰ"), "फ़" to listOf("f"), "ज़" to listOf("z"), "ख़" to listOf("x"), "ग़" to listOf("ɣ")
-        )
-
-        val vowels = mapOf(
-            "अ" to listOf("ə"), "आ" to listOf("a", "ː"), "इ" to listOf("ɪ"), "ई" to listOf("i", "ː"),
-            "उ" to listOf("ʊ"), "ऊ" to listOf("u", "ː"), "ऋ" to listOf("r", "ɪ"),
-            "ए" to listOf("e", "ː"), "ऐ" to listOf("ɛ", "ː"), "ओ" to listOf("o", "ː"), "औ" to listOf("ɔ", "ː"),
-            "ऑ" to listOf("ɔ", "ː")
-        )
-
-        val matras = mapOf(
-            "ा" to listOf("a", "ː"), "ि" to listOf("ɪ"), "ी" to listOf("i", "ː"),
-            "ु" to listOf("ʊ"), "ू" to listOf("u", "ː"), "ृ" to listOf("r", "ɪ"),
-            "े" to listOf("e", "ː"), "ै" to listOf("ɛ", "ː"), "ो" to listOf("o", "ː"), "ौ" to listOf("ɔ", "ː"),
-            "ॉ" to listOf("ɔ", "ː")
-        )
-
-        val virama = "्"
-        val anusvara = "ं"
-        val candrabindu = "ँ"
-        val visarga = "ः"
-
-        val phonemes = mutableListOf<String>()
-        val normalizedText = text
-            .replace("ऑफ़लाइन", "ऑफलाइन")
-            .replace("ऑ", "ओ")
-            .replace("ॉ", "ो")
-            .replace("ड़", "ड")
-            .replace("ढ़", "ढ")
-            .replace("फ़", "फ")
-            .replace("ज़", "ज")
-
-        val len = normalizedText.length
-        var i = 0
-
-        while (i < len) {
-            val cStr = normalizedText[i].toString()
-
-            if (cStr == " ") {
-                phonemes.add(" ")
-                i++
-                continue
-            }
-
-            if (consonants.containsKey(cStr)) {
-                val ph = consonants[cStr]!!
-                val nextChar = if (i + 1 < len) normalizedText[i + 1].toString() else null
-
-                phonemes.addAll(ph)
-
-                if (nextChar == virama) {
-                    i += 2
-                    continue
-                } else if (nextChar != null && matras.containsKey(nextChar)) {
-                    phonemes.addAll(matras[nextChar]!!)
-                    i += 2
-                } else {
-                    val isEnd = (i + 1 == len) || (normalizedText[i + 1] == ' ')
-                    if (!isEnd) {
-                        phonemes.add("ə")
-                    }
-                    i++
-                }
-                continue
-            }
-
-            if (vowels.containsKey(cStr)) {
-                phonemes.addAll(vowels[cStr]!!)
-                i++
-                continue
-            }
-
-            if (cStr == anusvara || cStr == candrabindu) {
-                phonemes.add("̃")
-                i++
-                continue
-            }
-
-            if (cStr == visarga) {
-                phonemes.add("h")
-                i++
-                continue
-            }
-
-            // English / ASCII words fallback
-            if (idMap.containsKey(cStr.lowercase())) {
-                phonemes.add(cStr.lowercase())
-            }
-            i++
         }
-
-        return phonemes
+        return result
     }
 
-    override suspend fun phonemize(text: String): List<LongArray> {
-        val ipaList = devanagariToIpa(text)
-        val ids = mutableListOf<Long>()
-        
-        ids.add(bosId)
-
-        // Piper VITS expects intersperse padding [pad, id, pad, id... pad]
-        for (ph in ipaList) {
-            val id = idMap[ph] ?: idMap[ph.lowercase()] ?: idMap[" "] ?: 0L
-            if (id != 0L) {
-                ids.add(padId)
-                ids.add(id)
-            }
-        }
-
-        ids.add(padId)
-        ids.add(eosId)
-        return listOf(ids.toLongArray())
-    }
+    override suspend fun phonemize(text: String): List<LongArray> =
+        phonemizeClauses(text).map { it.ids }
 
     override fun close() {}
 }

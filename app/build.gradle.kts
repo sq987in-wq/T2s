@@ -45,25 +45,13 @@ android {
     }
 
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.8"
+        // 1.5.10 pairs cleanly with Kotlin 1.9.23 (Compose-Kotlin compatibility map).
+        kotlinCompilerExtensionVersion = "1.5.10"
     }
 
     packaging {
         resources {
             excludes.add("/META-INF/{AL2.0,LGPL2.1}")
-        }
-    }
-
-    externalNativeBuild {
-        cmake {
-            path = file("CMakeLists.txt")
-            version = "3.22.1"
-        }
-    }
-
-    sourceSets {
-        getByName("main") {
-            jniLibs.srcDir("src/main/jniLibs")
         }
     }
 }
