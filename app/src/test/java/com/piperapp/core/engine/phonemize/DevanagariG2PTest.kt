@@ -54,7 +54,10 @@ class DevanagariG2PTest {
     @Test
     fun `digits and hinglish`() {
         val ph = g2p.phonemize("the year 1984")
-        assertTrue(ph.contains("k")) // h->...  actually contains several
+        // Latin letters map to model tokens; digits map to digit tokens.
+        assertTrue("contains letter t", ph.contains("t"))
+        assertTrue("contains letter h", ph.contains("h"))
+        assertTrue("contains letter e", ph.contains("e"))
         assertTrue("contains digit 1", ph.contains("1"))
         assertTrue("contains digit 9", ph.contains("9"))
         assertTrue("contains digit 8", ph.contains("8"))
