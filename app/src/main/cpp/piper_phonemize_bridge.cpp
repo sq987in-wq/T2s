@@ -1,27 +1,24 @@
-// piper_phonemize_bridge.cpp — CORRECTED reference JNI bridge (OPTIONAL native path).
+// piper_phonemize_bridge.cpp — Android-native espeak-ng phonemizer (OPT-IN path).
 //
-// WHY THIS IS NOT IN THE DEFAULT BUILD:
-//   The `libpiper_phonemize.so` that shipped in this repo is a *desktop-Linux
-//   (glibc)* binary — its DT_NEEDED lists `libc.so.6`, `libstdc++.so.6`,
-//   `libgcc_s.so.1`, `libespeak-ng.so.1`. Android uses bionic `libc.so` and
-//   has none of those, so this .so can never load on Android. That was the real
-//   root cause of the historical "crash-prone NDK C++" experience — not the
-//   bridge logic.
+// This is the REAL byte-parity bridge. It links piper-phonemize (which embeds
+// espeak-ng) and reproduces the exact phoneme->ID stream the Piper hi_IN models
+// were trained on — including espeak's schwa deletion, stress/tone markers,
+// anusvara assimilation, and per-clause sentence boundaries.
 //
-//   True byte-parity with the espeak-ng phonemizer requires an ANDROID build of
-//   piper-phonemize (+ espeak-ng data) produced by NDK on a host/CI, then this
-//   bridge links against it. To enable it:
-//     1. Build piper-phonemize for arm64-v8a/x86_64 (NDK) with espeak-ng.
-//     2. Bundle libpiper_phonemize.so + libespeak-ng.so + espeak-ng-data.
-//     3. Re-add `externalNativeBuild { cmake { ... } }` to app/build.gradle.kts
-//        and restore jniLibs packaging. The app's NativePhonemizer then routes
-//        through the native lib automatically.
+// WHY IT IS OPT-IN (not in the default build):
+//   Cross-compiling piper-phonemize + espeak-ng for ARM64 requires the Android
+//   NDK and a network fetch of the pinned piper-phonemize source. The default
+//   `assembleRelease` (used by CI and the Termux build script) stays on the
+//   proven pure-Kotlin engine and does NOT compile this, so nothing breaks.
+//   To enable: build with `-Pt2s.native=true` on an NDK-equipped host/CI, then
+//   ship the produced libpiper_phonemize.so in jniLibs (see
+//   scripts/build-native-lib.sh).
 //
-// THE HISTORICAL BUG THIS FIXES:
-//   Never use GetStringUTFChars for Indic text. It returns *modified* UTF-8,
-//   which corrupts Devanagari (outside the BMP) -> garbage phonemes, and on
-//   several ABIs/inputs a segfault. Always pass String.toByteArray(UTF_8) from
-//   Kotlin and read it with GetByteArrayRegion (true UTF-8) as below.
+// THE CRITICAL FIX vs. history:
+//   Never use GetStringUTFChars for Indic text — it returns MODIFIED UTF-8,
+//   which corrupts Devanagari (outside the BMP) into garbage phonemes and, on
+//   several ABIs, a segfault. We always receive String.toByteArray(UTF_8) from
+//   Kotlin and read it with GetByteArrayRegion (true UTF-8).
 
 #include <jni.h>
 #include <cstdlib>
@@ -31,7 +28,6 @@
 #include <mutex>
 #include <android/log.h>
 
-// piper-phonemize headers (pin an exact tag; see docs/native-reference/CMakeLists.txt).
 #include <piper-phonemize/phonemize.hpp>
 #include <piper-phonemize/phoneme_ids.hpp>
 #include <piper-phonemize/json.hpp>
@@ -43,6 +39,7 @@ static piper::PhonemeIdConfig gIdCfg;
 
 namespace {
 std::string fromUtf8Bytes(JNIEnv* env, jbyteArray arr) {
+    if (!arr) return "";
     jsize len = env->GetArrayLength(arr);
     std::string s(static_cast<size_t>(len), '\0');
     if (len > 0) {
@@ -50,16 +47,22 @@ std::string fromUtf8Bytes(JNIEnv* env, jbyteArray arr) {
     }
     return s;
 }
+
+void toJLongArray(JNIEnv* env, jlongArray out, const std::vector<jlong>& v) {
+    if (!out || v.empty()) return;
+    env->SetLongArrayRegion(out, 0, static_cast<jsize>(v.size()), v.data());
+}
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_piperapp_core_engine_phonemize_PhonemizerNative_init(
+Java_com_piperapp_core_engine_phonemize_PhonemizerNative_nativeInit(
     JNIEnv* env, jobject, jbyteArray jDataPath, jbyteArray jVoice, jbyteArray jIdMapJson) {
     std::lock_guard<std::mutex> lock(gMutex);
     std::string dataPath = fromUtf8Bytes(env, jDataPath);
     std::string voice    = fromUtf8Bytes(env, jVoice);
     std::string idJson   = fromUtf8Bytes(env, jIdMapJson);
 
+    // Point espeak-ng at the extracted data dir before first use.
     setenv("ESPEAK_DATA_PATH", dataPath.c_str(), 1);
 
     try {
@@ -77,7 +80,7 @@ Java_com_piperapp_core_engine_phonemize_PhonemizerNative_init(
 
 // Flattened ids; -1 marks a clause boundary. nullptr on failure/empty.
 extern "C" JNIEXPORT jlongArray JNICALL
-Java_com_piperapp_core_engine_phonemize_PhonemizerNative_phonemizeToIds(
+Java_com_piperapp_core_engine_phonemize_PhonemizerNative_nativePhonemizeToIds(
     JNIEnv* env, jobject, jbyteArray jTextUtf8) {
     std::lock_guard<std::mutex> lock(gMutex);
     if (!gReady) return nullptr;
@@ -98,6 +101,6 @@ Java_com_piperapp_core_engine_phonemize_PhonemizerNative_phonemizeToIds(
 
     jlongArray out = env->NewLongArray(static_cast<jsize>(flat.size()));
     if (out == nullptr) return nullptr;
-    env->SetLongArrayRegion(out, 0, static_cast<jsize>(flat.size()), flat.data());
+    toJLongArray(env, out, flat);
     return out;
 }

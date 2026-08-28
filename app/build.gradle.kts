@@ -59,6 +59,17 @@ android {
         // org.json library as a testImplementation dependency below).
         unitTests.isReturnDefaultValues = true
     }
+
+    // OPT-IN native espeak-ng path. Compiling piper-phonemize for ARM64 needs
+    // the Android NDK + a network fetch, so it is OFF by default (keeps CI and
+    // the pure-Kotlin Termux build green). Enable with:
+    //   gradle assembleDebug -Pt2s.native=true
+    // on an NDK-equipped host/CI. Produces libpiper_phonemize.so into jniLibs.
+    if ((project.findProperty("t2s.native") as String?) == "true") {
+        externalNativeBuild {
+            cmake { path = file("src/main/cpp/CMakeLists.txt") }
+        }
+    }
 }
 
 // Gate the release build on the JVM unit tests so CI runs them.

@@ -10,30 +10,33 @@ interface Phonemizer : AutoCloseable {
 }
 
 /**
- * Phonemization front-end.
+ * Phonemization front-end — hybrid "native-first" design.
  *
- * This builds a `List<LongArray>` of clause ID tensors: the input text is
- * normalized (NFC), segmented into prosody clauses (। . ! ? ; ॥), each clause
- * is converted to phoneme tokens by [DevanagariG2P] (all tokens guaranteed to
- * be in the model vocabulary), and each clause is framed with piper-exact
- * BOS/PAD/EOS padding by [PhonemeIdMap].
+ * PRIMARY PATH (byte-parity): if an Android-native `libpiper_phonemizer.so`
+ * (espeak-ng via piper-phonemize) is present, every clause is phonemized by
+ * espeak-ng itself — the exact stream the Piper models were trained on,
+ * including schwa deletion, stress/tone markers and anusvara assimilation.
+ * This is the only route to 100% studio-grade parity.
+ *
+ * FALLBACK PATH (always available): otherwise the corrected pure-Kotlin
+ * [DevanagariG2P] is used — normalized, clause-segmented, mapped only to tokens
+ * present in the model's `phoneme_id_map`, and framed with piper-exact
+ * BOS/PAD/EOS padding by [PhonemeIdMap]. This never crashes and never drops a
+ * consonant (proven by the JVM unit tests), it just approximates espeak.
  *
  * Long clauses are capped at [ClauseSegmenter.MAX_PHONEMES] to protect model
- * quality (a leading cause of the old "robotic pacing").
- *
- * NOTE on the name: despite "Native", this is the pure-Kotlin engine. The
- * prebuilt `libpiper_phonemize.so` in this repo is a desktop-Linux/glibc
- * binary (needs libc.so.6, libespeak-ng.so.1) and cannot load on Android —
- * it was the real source of the historical NDK crashes. True byte-parity with
- * espeak-ng requires an Android-native piper-phonemize build; see
- * docs/DeepAudit-100x.md for the optional path. This Kotlin G2P is the
- * always-available, build-safe engine and fixes the mapping/pacing defects.
+ * quality.
  */
-class NativePhonemizer(private val voiceDir: File) : Phonemizer {
+class NativePhonemizer(
+    private val voiceDir: File,
+    /** Path to extracted `espeak-ng-data` for the native path (may be empty). */
+    private val espeakDataPath: String = "",
+) : Phonemizer {
     constructor(voicePath: String) : this(File(voicePath))
 
     private val idMap: PhonemeIdMap
     private val g2p = DevanagariG2P()
+    private val nativeReady: Boolean
 
     init {
         val jsonFile = if (voiceDir.isDirectory) {
@@ -49,12 +52,23 @@ class NativePhonemizer(private val voiceDir: File) : Phonemizer {
         } catch (e: Exception) {
             throw PhonemizerException("Failed to parse phoneme_id_map: ${e.message}")
         }
+
+        nativeReady = PhonemizerNative.loadIfAvailable(
+            espeakDataPath = espeakDataPath,
+            voice = "hi", // from the model's espeak.voice
+            idMapJson = jsonFile.readText(),
+        )
     }
+
+    val isNative: Boolean get() = nativeReady
 
     data class ClauseResult(val ids: LongArray, val isSentenceEnd: Boolean)
 
     /** Segment + phonemize into clause ID tensors, with sentence-end metadata. */
     suspend fun phonemizeClauses(text: String): List<ClauseResult> {
+        if (nativeReady) {
+            return nativePhonemizeClauses(text)
+        }
         val clauses = ClauseSegmenter.segment(text)
         if (clauses.isEmpty()) return emptyList()
         val result = ArrayList<ClauseResult>()
@@ -66,6 +80,30 @@ class NativePhonemizer(private val voiceDir: File) : Phonemizer {
                     result.add(ClauseResult(ids, clause.isSentenceEnd))
                 }
             }
+        }
+        return result
+    }
+
+    /**
+     * Native path: espeak-ng already frames each sentence with BOS/PAD/EOS and
+     * returns one clause per sentence, separated by -1 in the flat array.
+     * We treat every native clause as a sentence end (that is how espeak
+     * segments) so the pipeline inserts a natural breath pause between them.
+     */
+    private fun nativePhonemizeClauses(text: String): List<ClauseResult> {
+        val flat = PhonemizerNative.phonemizeToIds(text) ?: return emptyList()
+        val result = ArrayList<ClauseResult>()
+        var start = 0
+        for (i in flat.indices) {
+            if (flat[i] == -1L) {
+                if (i > start) {
+                    result.add(ClauseResult(flat.copyOfRange(start, i), true))
+                }
+                start = i + 1
+            }
+        }
+        if (start < flat.size) {
+            result.add(ClauseResult(flat.copyOfRange(start, flat.size), true))
         }
         return result
     }

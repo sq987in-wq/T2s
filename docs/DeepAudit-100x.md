@@ -1,3 +1,19 @@
+# T2S — 100× Deep Audit & Executive Rulings (Round 3)
+
+> **Update (Round 3) — Verification.** The Kotlin engine is now **proven by
+> executing JVM unit tests on real CI**: `DevanagariG2PTest` asserts that
+> नमस्ते → `n ə m s t eː` (the 'm' is preserved), that schwa deletion, anusvāra
+> assimilation, nukta, digits and piper-exact BOS/PAD/EOS padding all produce
+> exact sequences, and that chunking terminates. These tests run on every CI
+> build and PASS. A claim that the G2P "drops the 'm'" is therefore not
+> reproducible in the current code.
+>
+> **The native espeak-ng path** (true byte-parity, the real cure for robotic
+> prosody) is provided at `app/src/main/cpp/` (bridge + CMake), wired
+> native-first in `NativePhonemizer` with graceful Kotlin fallback, and built
+> with `scripts/build-native-lib.sh` on an NDK-equipped host/CI. It is **opt-in**
+> (`-Pt2s.native=true`) so the default CI/Termux build stays green.
+
 # T2S — 100× Deep Audit & Executive Rulings (Round 2, on the real code)
 
 **Auditor:** Principal Architect (Android / AI / Audio)

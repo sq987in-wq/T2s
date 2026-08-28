@@ -4,13 +4,14 @@ project(piper_phonemizer_bridge)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# PIN an exact piper-phonemize tag (not "master" — reproducibility).
-# piper-phonemize statically links espeak-ng; use its prebuilt espeak-ng-data
-# as app assets (cross-compiling espeak data requires a host build).
+# PIN an exact piper-phonemize tag — never "master" (reproducibility).
+# piper-phonemize embeds a maintained espeak-ng fork. Cross-compiling espeak-ng
+# DATA requires a host build, so prefer piper-phonemize's PREBUILT
+# espeak-ng-data and bundle it as app assets instead of rebuilding it.
 FetchContent_Declare(
     piper-phonemize
     GIT_REPOSITORY https://github.com/rhasspy/piper-phonemize
-    GIT_TAG        <PINNED-TAG>   # REPLACE with a release commit hash
+    GIT_TAG        <PINNED-TAG>   # REPLACE with an exact release commit hash
     GIT_SUBMODULES_RECURSE true
 )
 FetchContent_MakeAvailable(piper-phonemize)
