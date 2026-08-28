@@ -1,0 +1,18 @@
+{
+  "version": "2",
+  "baseUrl": "https://github.com/sq987in-wq/T2s/releases/download/v2/",
+  "voices": [
+    {
+      "voiceId": "hi_IN-priyamvada-medium",
+      "name": "Priyamvada (Hindi)",
+      "lang": "hi",
+      "gender": "female",
+      "url": "hi_IN-priyamvada-medium-model.onnx",
+      "sha256": "abcd1234...",
+      "sizeBytes": 63848640,
+      "modelFile": "model.onnx",
+      "jsonFile": "model.onnx.json",
+      "sampleRate": 22050
+    }
+  ]
+}

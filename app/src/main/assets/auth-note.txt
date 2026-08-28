@@ -1,0 +1,1 @@
+ONNX model and voice configs delivered via CI artifacts or app download
