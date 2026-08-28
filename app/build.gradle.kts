@@ -45,8 +45,7 @@ android {
     }
 
     composeOptions {
-        // 1.5.10 pairs cleanly with Kotlin 1.9.23 (Compose-Kotlin compatibility map).
-        kotlinCompilerExtensionVersion = "1.5.10"
+        kotlinCompilerExtensionVersion = "1.5.8" // pairs with Kotlin 1.9.22
     }
 
     packaging {
