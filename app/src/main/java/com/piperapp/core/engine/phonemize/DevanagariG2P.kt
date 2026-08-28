@@ -34,11 +34,17 @@ class DevanagariG2P {
                     out.add(ascii.toString())
                     i++
                 }
+                c == '।' || c == '॥' -> { i++ } // danda/double-danda: clause-boundary
+                // marker. Skip it here (breath-pause prosody is handled upstream
+                // by ClauseSegmenter). CRITICAL: danda (U+0964) and double-danda
+                // (U+0965) live INSIDE the Devanagari block U+0900..U+097F, so
+                // they must be handled BEFORE the generic Devanagari branch, or
+                // the word-reader below cannot advance past them -> infinite loop.
                 c in '\u0900'..'\u097F' -> {
                     var j = i
                     while (j < n && !text[j].isWhitespace() && text[j] != '।' && text[j] != '॥') j++
-                    phonemizeWord(text.substring(i, j), out)
-                    i = j
+                    if (j > i) phonemizeWord(text.substring(i, j), out)
+                    i = if (j > i) j else i + 1 // always make forward progress
                 }
                 c.isLetter() -> {
                     var j = i
